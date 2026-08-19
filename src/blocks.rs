@@ -36,10 +36,10 @@ fn parse_ignore(body: &str) -> Option<(Vec<String>, bool)> {
 pub fn language_for(path: &str) -> Option<Language> {
     let ext = path.rsplit('.').next()?;
     match ext {
-        "rb" | "rake" | "gemspec" => Some(tree_sitter_ruby::language()),
-        "js" | "jsx" | "mjs" | "cjs" => Some(tree_sitter_javascript::language()),
-        "ts" => Some(tree_sitter_typescript::language_typescript()),
-        "tsx" => Some(tree_sitter_typescript::language_tsx()),
+        "rb" | "rake" | "gemspec" => Some(tree_sitter_ruby::LANGUAGE.into()),
+        "js" | "jsx" | "mjs" | "cjs" => Some(tree_sitter_javascript::LANGUAGE.into()),
+        "ts" => Some(tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()),
+        "tsx" => Some(tree_sitter_typescript::LANGUAGE_TSX.into()),
         _ => None,
     }
 }
@@ -99,7 +99,7 @@ fn strip_marker(raw: &str) -> (usize, &str) {
 
 pub fn blocks(source: &str, language: Language) -> Vec<Block> {
     let mut parser = Parser::new();
-    if parser.set_language(language).is_err() {
+    if parser.set_language(&language).is_err() {
         return Vec::new();
     }
     let Some(tree) = parser.parse(source, None) else {
