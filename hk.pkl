@@ -1,0 +1,47 @@
+amends "package://github.com/jdx/hk/releases/download/v1.56.0/hk@1.56.0#/Config.pkl"
+
+local comment_lint = new Step {
+    // `types` matches by extension AND shebang, so extensionless Ruby
+    // scripts are covered too. A `glob` alone would miss them.
+    types = List("ruby", "javascript", "typescript")
+
+    // No `fix` command: these findings need a human rewrite, and an
+    // auto-rewrite of prose is not something to run unattended.
+    check = new Command {
+        argv = List("comment-lint", "--rules", "STE001,STE002,STE006,STE007", "{{files}}")
+    }
+
+    // Start narrow. STE003/004/005 are regex approximations of
+    // POS-dependent rules; add them once you have seen the noise.
+    output_summary = "stdout"
+
+    tests {
+        ["flags a wordy phrase"] {
+            run = "check"
+            write {
+                ["{{tmp}}/a.rb"] = "# In order to boot we utilize the pool.\nx = 1\n"
+            }
+            expect {
+                code = 1
+                stdout = "STE006"
+            }
+        }
+        ["ignores code-heavy comments"] {
+            run = "check"
+            write {
+                ["{{tmp}}/b.rb"] = "# Call `Widget#find_by_slug` to get the record.\nx = 1\n"
+            }
+            expect { code = 0 }
+        }
+    }
+}
+
+hooks {
+    ["pre-commit"] {
+        steps { ["comment-lint"] = comment_lint }
+    }
+    // `hk check` and the agent invocation both resolve here.
+    ["check"] {
+        steps { ["comment-lint"] = comment_lint }
+    }
+}
