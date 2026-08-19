@@ -66,8 +66,8 @@ trap 'rm -f "$FILES" "$RAW_LIST"' EXIT
 
 SCOPED_FROM_TRANSCRIPT=0
 if [ "$HAVE_JQ" -eq 1 ] && [ -n "$TRANSCRIPT_PATH" ] && [ -r "$TRANSCRIPT_PATH" ]; then
-  jq -R 'fromjson? | .message.content[]? | select(.type=="tool_use") | select(.name=="Edit" or .name=="Write" or .name=="MultiEdit" or .name=="NotebookEdit") | .input.file_path // empty' \
-    "$TRANSCRIPT_PATH" 2>/dev/null | jq -r 'select(. != null)' 2>/dev/null > "$RAW_LIST"
+  jq -R -r 'fromjson? | .message.content[]? | select(.type=="tool_use") | select(.name=="Edit" or .name=="Write" or .name=="MultiEdit" or .name=="NotebookEdit") | .input.file_path // empty' \
+    "$TRANSCRIPT_PATH" 2>/dev/null > "$RAW_LIST"
   SCOPED_FROM_TRANSCRIPT=1
 fi
 
@@ -149,5 +149,5 @@ fi
 if [ -n "$ROUNDS_FILE" ]; then
   printf '%s\n' "$((ROUNDS + 1))" > "$ROUNDS_FILE"
 fi
-printf '%s\n' "$STDOUT_OUT" >&2
+printf '%s\n' "$OUT" >&2
 exit 2
