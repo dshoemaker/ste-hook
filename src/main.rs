@@ -73,9 +73,11 @@ fn main() -> ExitCode {
         // rewrites the comment, not that a tool rewrites it for them.
         let _ = writeln!(
             w,
-            "{} comment issue(s) found. Rewrite the comments below to satisfy \
-             ASD-STE100. Do not delete the comments and do not weaken them to \
-             pass the check.\n",
+            "{} comment issue(s) found.\n\
+             For RED001/RED002 (redundant or narration comments): delete the \
+             comment, or replace it with rationale the code cannot express.\n\
+             For STE rules: rewrite the comment. Do not delete it and do not \
+             strip it down to something uninformative to pass the check.\n",
             all.len()
         );
         let mut last = String::new();
@@ -90,8 +92,9 @@ fn main() -> ExitCode {
         let _ = writeln!(
             w,
             "\nIf a finding genuinely does not apply, put a directive comment on \
-             the line above the block:\n  # ste:ignore STE001    (or bare `ste:ignore` \
-             for the whole block)\nUse this sparingly and only with a reason."
+             the line above the block:\n  # comment-lint:ignore STE001    (or bare \
+             `comment-lint:ignore` for the whole block)\nUse this sparingly and only \
+             with a reason."
         );
     } else if jsonl {
         for d in &all {

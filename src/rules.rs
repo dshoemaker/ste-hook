@@ -125,13 +125,155 @@ impl Default for Limits {
     }
 }
 
-pub fn check(text: &str, limits: &Limits, enabled: &[String]) -> Vec<Finding> {
+/// Where the block sits in the tree. Word limits apply only in doc
+/// position; the redundancy rule needs the adjacent code's header line.
+pub struct Context<'a> {
+    pub is_doc: bool,
+    pub attached_code: Option<&'a str>,
+}
+
+/// Function words carrying no content; excluded before the overlap test.
+const STOPWORDS: [&str; 40] = [
+    "the", "a", "an", "to", "of", "in", "on", "for", "and", "or", "not", "by", "at", "it", "its",
+    "this", "that", "these", "those", "with", "from", "as", "is", "are", "was", "were", "be",
+    "been", "we", "you", "they", "if", "then", "else", "when", "into", "via", "per", "each", "all",
+];
+
+/// Light suffix stripping so "finds" matches "find" and "parsing" "parse".
+fn stem(w: &str) -> &str {
+    for (suffix, min_len) in [("ing", 6), ("ed", 5), ("es", 5), ("s", 4)] {
+        if w.len() >= min_len && w.ends_with(suffix) {
+            return &w[..w.len() - suffix.len()];
+        }
+    }
+    w
+}
+
+/// snake_case and camelCase identifiers split into lowercase word parts.
+fn split_ident(token: &str) -> Vec<String> {
+    let mut parts = Vec::new();
+    let mut cur = String::new();
+    for ch in token.chars() {
+        if ch == '_' {
+            if !cur.is_empty() {
+                parts.push(cur.to_ascii_lowercase());
+                cur = String::new();
+            }
+        } else if ch.is_uppercase() && cur.chars().last().is_some_and(|c| c.is_lowercase()) {
+            parts.push(cur.to_ascii_lowercase());
+            cur = ch.to_string();
+        } else {
+            cur.push(ch);
+        }
+    }
+    if !cur.is_empty() {
+        parts.push(cur.to_ascii_lowercase());
+    }
+    parts
+}
+
+/// Every word (and stem) present in the identifiers of a line of code.
+fn identifier_words(code: &str) -> std::collections::HashSet<String> {
+    static CELL: OnceLock<Regex> = OnceLock::new();
+    let rx = re(&CELL, r"[A-Za-z][A-Za-z0-9_]*");
+    let mut out = std::collections::HashSet::new();
+    for m in rx.find_iter(code) {
+        for part in split_ident(m.as_str()) {
+            if part.len() >= 2 {
+                out.insert(stem(&part).to_string());
+                out.insert(part);
+            }
+        }
+    }
+    out
+}
+
+/// Change-log and process-narration phrasings. One finding per block is
+/// enough: the fix is deleting or rewriting the whole comment.
+const NARRATION: [&str; 9] = [
+    r"(?i)\bnow\s+(?:uses|checks|returns|handles|calls|takes|supports|does|has|includes|works|also)\b",
+    r"(?i)\bpreviously\b",
+    r"(?i)\bno\s+longer\b",
+    r"(?i)\bthis\s+(?:change|commit|pr|patch|update|refactor|edit)\b",
+    r"(?i)\bas\s+requested\b",
+    r"(?i)\bper\s+(?:the\s+)?(?:request|feedback|review|discussion)\b",
+    r"(?i)\b(?:first|next|then|finally),?\s+we\b",
+    r"(?i)\bupdated?\s+to\s+(?:use|support|handle|match)\b",
+    r"(?i)\bchanged\s+(?:from|to)\b",
+];
+
+/// Commit-message verbs opening a sentence, followed by an object; guards
+/// against adjectival reads like "Removed entries expire".
+const COMMIT_VERB: &str = r"(?i)^\s*(?:added|removed|fixed|renamed|moved|changed|updated|refactored|improved)\s+(?:the|a|an|this|that|it|to|support|unused)\b";
+
+pub fn check(text: &str, limits: &Limits, enabled: &[String], ctx: &Context) -> Vec<Finding> {
     let masked = mask(text);
     let sents = sentences(text, &masked);
     let mut out: Vec<Finding> = Vec::new();
     let on = |code: &str| enabled.is_empty() || enabled.iter().any(|e| e == code);
 
-    if on("STE001") {
+    // The redundancy test runs on the original text, not the masked one:
+    // masking blanks exactly the identifiers the overlap needs.
+    if on("RED001") {
+        if let Some(code_line) = ctx.attached_code {
+            let idents = identifier_words(code_line);
+            static CELL: OnceLock<Regex> = OnceLock::new();
+            let rx = re(&CELL, r"[A-Za-z]{2,}");
+            let content: Vec<&str> = rx
+                .find_iter(text)
+                .map(|m| m.as_str())
+                .filter(|w| !STOPWORDS.contains(&w.to_ascii_lowercase().as_str()))
+                .collect();
+            let all_restated = !content.is_empty()
+                && !idents.is_empty()
+                && content.iter().all(|w| {
+                    let lw = w.to_ascii_lowercase();
+                    idents.contains(&lw) || idents.contains(stem(&lw))
+                });
+            if all_restated {
+                out.push(Finding {
+                    start: 0,
+                    len: text.len(),
+                    code: "RED001",
+                    message: "comment restates the adjacent code".into(),
+                    help: "Delete it, or state what the code cannot say: why, constraints, units.",
+                });
+            }
+        }
+    }
+
+    if on("RED002") {
+        let mut hit: Option<(usize, usize)> = None;
+        for pattern in NARRATION {
+            let rx = Regex::new(pattern).expect("built-in pattern is valid");
+            if let Some(m) = rx.find(&masked) {
+                if hit.map_or(true, |(s, _)| m.start() < s) {
+                    hit = Some((m.start(), m.len()));
+                }
+            }
+        }
+        if hit.is_none() {
+            static CELL: OnceLock<Regex> = OnceLock::new();
+            let rx = re(&CELL, COMMIT_VERB);
+            for (s, e) in &sents {
+                if let Some(m) = rx.find(&masked[*s..*e]) {
+                    hit = Some((s + m.start(), m.len()));
+                    break;
+                }
+            }
+        }
+        if let Some((start, len)) = hit {
+            out.push(Finding {
+                start,
+                len,
+                code: "RED002",
+                message: "narration or change-log comment".into(),
+                help: "Describe the code as it is, or delete the comment. Editing history belongs in the commit message.",
+            });
+        }
+    }
+
+    if on("STE001") && ctx.is_doc {
         for (s, e) in &sents {
             let body = &text[*s..*e];
             let n = body.split_whitespace().count();

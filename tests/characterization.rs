@@ -102,7 +102,7 @@ fn semicolon_in_prose_is_flagged() {
 
 #[test]
 fn scoped_ignore_suppresses_only_listed_codes() {
-    let src = "# ste:ignore STE007\n\
+    let src = "# comment-lint:ignore STE007\n\
                # The pool boots; we go in order to warm it.\n\
                x = 1\n";
     let d = lint_rb(src, &["STE006", "STE007"]);
@@ -112,7 +112,7 @@ fn scoped_ignore_suppresses_only_listed_codes() {
 
 #[test]
 fn blanket_ignore_suppresses_everything_for_next_block_only() {
-    let src = "# ste:ignore\n\
+    let src = "# comment-lint:ignore\n\
                # The pool boots; we go in order to warm it.\n\
                x = 1\n\
                # In order to check the second block.\n\
@@ -139,17 +139,18 @@ fn ruby_equals_begin_comment_is_unwrapped_and_linted() {
 
 #[test]
 fn procedural_sentence_gets_the_tighter_limit() {
+    // Word limits apply in doc position, so both comments sit above a def.
     // 21 words, imperative lead ("Set") -> over the 20-word procedural cap.
     let s = "Set the pool size to ten when the app boots so the first busy request does not wait on a handshake.";
     assert_eq!(s.split_whitespace().count(), 21);
-    let src = format!("# {s}\nx = 1\n");
+    let src = format!("# {s}\ndef boot\n  x\nend\n");
     let d = lint_rb(&src, &["STE001"]);
     assert_eq!(d.len(), 1, "{:?}", msgs(&d));
 
     // Same length, descriptive lead -> under the 25-word descriptive cap.
     let s2 = "The pool size is ten when the app boots so the first busy request does not wait on a slow handshake.";
     assert_eq!(s2.split_whitespace().count(), 21);
-    let src2 = format!("# {s2}\nx = 1\n");
+    let src2 = format!("# {s2}\ndef boot\n  x\nend\n");
     assert!(lint_rb(&src2, &["STE001"]).is_empty());
 }
 

@@ -16,7 +16,7 @@ pub struct Diagnostic {
 
 pub fn severity_of(code: &str) -> &'static str {
     match code {
-        "STE001" | "STE002" | "STE007" => "error",
+        "RED001" | "RED002" | "STE001" | "STE002" | "STE007" => "error",
         _ => "warning",
     }
 }
@@ -36,7 +36,11 @@ pub fn lint_source(
         if block.ignore_all {
             continue;
         }
-        for f in rules::check(&block.text, limits, enabled) {
+        let ctx = rules::Context {
+            is_doc: block.is_doc,
+            attached_code: block.attached_code.as_deref(),
+        };
+        for f in rules::check(&block.text, limits, enabled, &ctx) {
             if block.ignore.iter().any(|c| c == f.code) {
                 continue;
             }

@@ -5,22 +5,24 @@ pub struct Block {
     pub text: String,
     /// One entry per byte of `text`: (line, column) in the original file.
     pub map: Vec<(usize, usize)>,
-    /// Codes suppressed by a preceding `ste:ignore` directive. Empty vec with
-    /// `ignore_all` set means every code is suppressed.
+    /// Codes suppressed by a preceding `comment-lint:ignore` directive. Empty
+    /// vec with `ignore_all` set means every code is suppressed.
     pub ignore: Vec<String>,
     pub ignore_all: bool,
+    /// True when the block sits directly above a definition (doc position).
+    pub is_doc: bool,
+    /// First line of the adjacent code node, when the block is directly
+    /// above one. Feeds the redundancy rule.
+    pub attached_code: Option<String>,
 }
 
-/// `# ste:ignore` suppresses everything in the next block.
-/// `# ste:ignore STE001,STE006` suppresses only those codes.
+/// `# comment-lint:ignore` suppresses everything in the next block.
+/// `# comment-lint:ignore STE001,STE006` suppresses only those codes.
 /// This is the escape hatch that keeps a blocking hook from looping forever
 /// on a comment that genuinely cannot comply.
 fn parse_ignore(body: &str) -> Option<(Vec<String>, bool)> {
     let t = body.trim();
-    let rest = t
-        .strip_prefix("ste:ignore")
-        .or_else(|| t.strip_prefix("ste-ignore"))
-        .or_else(|| t.strip_prefix("ste:disable"))?;
+    let rest = t.strip_prefix("comment-lint:ignore")?;
     let rest = rest.trim_start_matches(':').trim();
     if rest.is_empty() {
         return Some((Vec::new(), true));
@@ -97,6 +99,73 @@ fn strip_marker(raw: &str) -> (usize, &str) {
     (raw.len() - trimmed.len(), trimmed)
 }
 
+/// Node kinds a doc comment can attach to, across all four grammars.
+const DEF_KINDS: [&str; 10] = [
+    "method",
+    "singleton_method",
+    "class",
+    "module",
+    "function_declaration",
+    "generator_function_declaration",
+    "class_declaration",
+    "method_definition",
+    "interface_declaration",
+    "enum_declaration",
+];
+
+/// Attachment context for the comment node closing a block: is the next
+/// named sibling a definition, and what is its header line? Adjacency is
+/// strict — a blank line between comment and code detaches the block.
+fn attachment(last: Node, source: &str) -> (bool, Option<String>) {
+    let Some(sib) = last.next_named_sibling() else {
+        return (false, None);
+    };
+    if sib.kind() == "comment" || sib.start_position().row != last.end_position().row + 1 {
+        return (false, None);
+    }
+    let text = sib.utf8_text(source.as_bytes()).unwrap_or("");
+    let first_line = text.lines().next().unwrap_or("").to_string();
+    let is_doc = DEF_KINDS.contains(&sib.kind())
+        || (matches!(sib.kind(), "lexical_declaration" | "variable_declaration")
+            && (first_line.contains("=>") || first_line.contains("function")));
+    (is_doc, Some(first_line))
+}
+
+fn flush<'t>(
+    run: &mut Vec<(usize, usize, String, Node<'t>)>,
+    out: &mut Vec<Block>,
+    pending: &mut Option<(Vec<String>, bool)>,
+    source: &str,
+) {
+    if run.is_empty() {
+        return;
+    }
+    let mut text = String::new();
+    let mut map: Vec<(usize, usize)> = Vec::new();
+    for (row, col, body, _) in run.iter() {
+        if !text.is_empty() {
+            text.push(' ');
+            map.push(*map.last().unwrap());
+        }
+        for (i, ch) in body.char_indices() {
+            let mut buf = [0u8; 4];
+            for _ in ch.encode_utf8(&mut buf).bytes() {
+                map.push((*row, col + i));
+            }
+            text.push(ch);
+        }
+    }
+    let (is_doc, attached_code) = run
+        .last()
+        .map(|(_, _, _, node)| attachment(*node, source))
+        .unwrap_or((false, None));
+    run.clear();
+    if !text.trim().is_empty() {
+        let (ignore, ignore_all) = pending.take().unwrap_or((Vec::new(), false));
+        out.push(Block { text, map, ignore, ignore_all, is_doc, attached_code });
+    }
+}
+
 pub fn blocks(source: &str, language: Language) -> Vec<Block> {
     let mut parser = Parser::new();
     if parser.set_language(&language).is_err() {
@@ -112,36 +181,8 @@ pub fn blocks(source: &str, language: Language) -> Vec<Block> {
 
     let lines: Vec<&str> = source.lines().collect();
     let mut out = Vec::new();
-    let mut run: Vec<(usize, usize, String)> = Vec::new();
+    let mut run: Vec<(usize, usize, String, Node)> = Vec::new();
     let mut pending: Option<(Vec<String>, bool)> = None;
-
-    let flush = |run: &mut Vec<(usize, usize, String)>,
-                 out: &mut Vec<Block>,
-                 pending: &mut Option<(Vec<String>, bool)>| {
-        if run.is_empty() {
-            return;
-        }
-        let mut text = String::new();
-        let mut map: Vec<(usize, usize)> = Vec::new();
-        for (row, col, body) in run.iter() {
-            if !text.is_empty() {
-                text.push(' ');
-                map.push(*map.last().unwrap());
-            }
-            for (i, ch) in body.char_indices() {
-                let mut buf = [0u8; 4];
-                for _ in ch.encode_utf8(&mut buf).bytes() {
-                    map.push((*row, col + i));
-                }
-                text.push(ch);
-            }
-        }
-        run.clear();
-        if !text.trim().is_empty() {
-            let (ignore, ignore_all) = pending.take().unwrap_or((Vec::new(), false));
-            out.push(Block { text, map, ignore, ignore_all });
-        }
-    };
 
     for node in nodes {
         let start = node.start_position();
@@ -158,7 +199,7 @@ pub fn blocks(source: &str, language: Language) -> Vec<Block> {
 
         // Multi-line comments (/* */, =begin) are their own block.
         if end.row != start.row {
-            flush(&mut run, &mut out, &mut pending);
+            flush(&mut run, &mut out, &mut pending, source);
             let body: String = raw
                 .lines()
                 .map(|l| {
@@ -175,30 +216,31 @@ pub fn blocks(source: &str, language: Language) -> Vec<Block> {
             if !body.trim().is_empty() && standalone {
                 let map = vec![(start.row, start.column); body.len()];
                 let (ignore, ignore_all) = pending.take().unwrap_or((Vec::new(), false));
-                out.push(Block { text: body, map, ignore, ignore_all });
+                let (is_doc, attached_code) = attachment(node, source);
+                out.push(Block { text: body, map, ignore, ignore_all, is_doc, attached_code });
             }
             continue;
         }
 
         let (lead, body) = strip_marker(raw);
         if let Some(directive) = parse_ignore(body) {
-            flush(&mut run, &mut out, &mut pending);
+            flush(&mut run, &mut out, &mut pending, source);
             pending = Some(directive);
             continue;
         }
         if !standalone || is_noise(body) {
-            flush(&mut run, &mut out, &mut pending);
+            flush(&mut run, &mut out, &mut pending, source);
             continue;
         }
 
         // The joining predicate: adjacent line, identical column.
-        if let Some((prow, pcol, _)) = run.last() {
+        if let Some((prow, pcol, _, _)) = run.last() {
             if *prow + 1 != start.row || *pcol != start.column {
-                flush(&mut run, &mut out, &mut pending);
+                flush(&mut run, &mut out, &mut pending, source);
             }
         }
-        run.push((start.row, start.column + lead, body.to_string()));
+        run.push((start.row, start.column + lead, body.to_string(), node));
     }
-    flush(&mut run, &mut out, &mut pending);
+    flush(&mut run, &mut out, &mut pending, source);
     out
 }
