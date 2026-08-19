@@ -6,9 +6,13 @@ keeps the contract any commit gate needs (exit 0 clean / 1 findings,
 Be aware a pre-commit gate lints *human* comments too, not just agent
 output.
 
-Add this to the target repo's `hk.pkl`, then run `hk validate` — the
-snippet was written from the hk docs and has not been validated against a
-live hk install:
+Add this to the target repo's `hk.pkl`. Validated against hk 1.56.0 /
+pkl 0.32.1 on 2026-08-19: `hk validate` passes, both embedded step tests
+pass, and a live pre-commit run blocked a staged file with findings and
+passed a clean one. Keep the config out of a shared repo's tree with
+`.git/info/exclude` if the gate is personal — a committed `hk.pkl` is
+inert for teammates until they run `hk install`, but it is still a root
+file they will ask about.
 
 ```pkl
 amends "package://github.com/jdx/hk/releases/download/v1.56.0/hk@1.56.0#/Config.pkl"
