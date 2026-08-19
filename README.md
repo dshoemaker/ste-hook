@@ -80,14 +80,25 @@ There is no autofix and no `fix` command by design.
 
 ## Install (per project, opt-in)
 
-1. `cargo install --path .`
+1. `cargo install --path .` (per machine, run in this repo — one install
+   serves every project).
 2. Copy `hooks/comment-lint-stop.sh` into the target repo's
    `.claude/hooks/` and merge `settings.json` into its
    `.claude/settings.json`. Not as a plugin — plugin-installed Stop hooks
    have a known bug where exit 2 halts instead of continuing.
-3. Append `CLAUDE-comment-style.md` to the repo's `CLAUDE.md` so the agent
-   writes compliant comments the first time.
-4. Optional pre-commit gate: see [docs/hk-recipe.md](docs/hk-recipe.md).
+
+That is the whole install: enforcement is hook-only by design. The
+`--format agent` feedback teaches the rules when a finding fires, so the
+agent needs no standing instructions — and nothing bleeds into its output
+on turns where comments are fine.
+
+Optional extras, both off by default:
+
+- `CLAUDE-comment-style.md` can be appended to the repo's `CLAUDE.md` to
+  prevent findings instead of correcting them, saving a round trip per
+  violating turn — at the cost of permanent style prose in every prompt,
+  which may influence unrelated output.
+- Pre-commit gate: see [docs/hk-recipe.md](docs/hk-recipe.md).
 
 The hook lints only files the session's agent actually edited (read from
 the transcript), allows up to three correction rounds per stop, and never
