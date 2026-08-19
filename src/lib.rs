@@ -16,7 +16,7 @@ pub struct Diagnostic {
 
 pub fn severity_of(code: &str) -> &'static str {
     match code {
-        "RED001" | "RED002" | "STE001" | "STE002" | "STE007" => "error",
+        "RED001" | "RED002" | "STE001" | "STE002" | "STE006" | "STE007" => "error",
         _ => "warning",
     }
 }
