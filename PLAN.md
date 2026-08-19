@@ -1,5 +1,8 @@
 # comment-lint v1 plan — post-grilling, 2026-08-19
 
+> **Status: executed 2026-08-19.** All work items below are done except
+> deployment into a dogfood repo, which happens at adoption time.
+
 Supersedes the open questions in [IMPLEMENTATION.md](IMPLEMENTATION.md),
 which remains the prior agent's handoff record. Decisions below came out of
 a grilling session; the reframing is recorded in

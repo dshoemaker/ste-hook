@@ -34,7 +34,7 @@ fn main() -> ExitCode {
                 i += 1;
             }
             "--help" | "-h" => {
-                eprintln!("comment-lint [--rules STE001,STE006] [--format text|jsonl|agent] [--files0-from -] <files...>");
+                eprintln!("comment-lint [--rules RED001,RED002,STE001,STE006] [--format text|jsonl|agent] [--files0-from -] <files...>");
                 return ExitCode::SUCCESS;
             }
             other => paths.push(other.to_string()),

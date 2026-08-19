@@ -1,4 +1,10 @@
-# comment-lint — implementation note
+# comment-lint — implementation note (historical)
+
+> **Superseded.** This is the original handoff, kept as a record. The
+> decisions in [PLAN.md](PLAN.md) replace its open questions, and the plan
+> has been executed: tests exist, tree-sitter is current, the RED rule
+> family and position-aware STE001 are built, the directive is
+> `comment-lint:ignore`, and the Stop hook scopes via the transcript.
 
 You are picking up a working prototype. It compiles and its behaviour is
 verified. This note tells you what is done, what is not, and what to be
